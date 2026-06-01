@@ -23,5 +23,7 @@
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowAnimationStyle">@null</item>
         <item name="android:backgroundDimEnabled">false</item>
+        <!-- Suppress the brief "starting window" flash on cold launch -->
+        <item name="android:windowDisablePreview">true</item>
     </style>
 </resources>

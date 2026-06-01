@@ -43,6 +43,16 @@ object Uploader {
         val bytes = resolver.openInputStream(uri)?.readBytes()
             ?: error("Cannot read file from URI")
 
+        return uploadBytes(prefs, bytes, filename, mimeType)
+    }
+
+    /** Upload raw bytes already read into memory (used by the clipboard sender). */
+    fun uploadBytes(
+        prefs: Prefs,
+        bytes: ByteArray,
+        filename: String,
+        mimeType: String,
+    ): Response {
         // Android sometimes passes wildcard types like "image/*" in the Intent.
         // OkHttp requires a concrete media type (no wildcards), so we sanitize here.
         val safeMime = if (mimeType.contains("*")) "application/octet-stream" else mimeType

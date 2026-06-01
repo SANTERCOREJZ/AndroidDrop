@@ -76,7 +76,7 @@ class ShareActivity : AppCompatActivity() {
         // Dispatchers.IO = run on a background thread (for network / disk work)
         lifecycleScope.launch(Dispatchers.IO) {
             val (ok, msg) = try {
-                val resp = Uploader.uploadText(prefs, text)
+                val resp = Sender.send(this@ShareActivity, prefs) { Uploader.uploadText(prefs, text) }
                 Pair(resp.isSuccessful, if (resp.isSuccessful) "Text sent to Mac ✓" else "Server error ${resp.code}")
             } catch (e: Exception) {
                 Pair(false, "Connection failed: ${e.message}")
@@ -90,7 +90,7 @@ class ShareActivity : AppCompatActivity() {
         setStatus("Sending file…")
         lifecycleScope.launch(Dispatchers.IO) {
             val (ok, msg) = try {
-                val resp = Uploader.uploadFile(prefs, contentResolver, uri, mimeType)
+                val resp = Sender.send(this@ShareActivity, prefs) { Uploader.uploadFile(prefs, contentResolver, uri, mimeType) }
                 Pair(resp.isSuccessful, if (resp.isSuccessful) "Sent to Mac ✓" else "Server error ${resp.code}")
             } catch (e: Exception) {
                 Pair(false, "Connection failed: ${e.message}")

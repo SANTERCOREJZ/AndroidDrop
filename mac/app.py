@@ -20,7 +20,8 @@ import rumps
 import uvicorn
 
 import config
-from server import app as fastapi_app
+import discovery
+from server import app as fastapi_app, _local_ip
 
 
 # ── Server thread ─────────────────────────────────────────────────────────────
@@ -48,7 +49,7 @@ class AndroidDropApp(rumps.App):
             rumps.MenuItem("Open Received Folder", callback=self.open_folder),
             rumps.MenuItem("Recent Items",         callback=self.show_recent),
             None,  # separator
-            rumps.MenuItem(f"Listening on  :{config.PORT}"),  # informational, no callback
+            rumps.MenuItem(f"Listening on  {_local_ip()}:{config.PORT}"),  # informational, no callback
             None,
             rumps.MenuItem("Quit", callback=self.quit_app),
         ]
@@ -56,6 +57,10 @@ class AndroidDropApp(rumps.App):
         # Start the HTTP server in the background before the menu bar appears.
         t = threading.Thread(target=_run_server, daemon=True)
         t.start()
+
+        # Advertise ourselves via mDNS so Android can find us automatically,
+        # even after the Mac's IP changes.
+        discovery.start()
 
     # ── Menu callbacks ────────────────────────────────────────────────────────
 
@@ -79,6 +84,7 @@ class AndroidDropApp(rumps.App):
         rumps.alert(title="Recent Items", message=body, ok="Close")
 
     def quit_app(self, _):
+        discovery.stop()
         rumps.quit_application()
 
 

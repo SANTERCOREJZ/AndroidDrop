@@ -1,7 +1,7 @@
 package com.androiddrop
 
-import android.content.ClipboardManager
-import android.content.Context
+import android.app.PendingIntent
+import android.content.Intent
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
@@ -11,17 +11,22 @@ import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 /**
- * Quick Settings tile — the button in the notification shade.
+ * Quick Settings tile — the button in the notification shade / quick settings panel.
  *
  * Lifecycle:
- *   onStartListening() — shade is open, tile is visible: ping Mac, show connection status
- *   onClick()          — user tapped the tile: send clipboard content
- *   onDestroy()        — tile removed or service killed: cancel all coroutines
+ *   onStartListening() — tile is visible: ping Mac, show connection status
+ *   onClick()          — user tapped: send the clipboard
+ *   onDestroy()        — tile removed / service killed: cancel coroutines
+ *
+ * On tap we DON'T read the clipboard here. Android 10+ only allows clipboard reads
+ * while a window has input focus, and a tile service has none. So we launch the
+ * transparent ClipSendActivity (via startActivityAndCollapse), which reads the
+ * clipboard once it gains focus and sends it — the exact same path the notification
+ * "Send Clipboard" button uses.
  *
  * Tile states:
- *   STATE_ACTIVE   = colored  → Mac reachable, ready
- *   STATE_INACTIVE = grey     → Mac not reachable / not configured
- *   STATE_UNAVAILABLE = dimmed, unclickable → currently sending
+ *   STATE_ACTIVE   = colored → Mac reachable / ready
+ *   STATE_INACTIVE = grey    → Mac not reachable / not configured
  */
 class ClipboardTileService : TileService() {
 
@@ -38,7 +43,7 @@ class ClipboardTileService : TileService() {
         scope.cancel()
     }
 
-    // Called every time the tile becomes visible (user pulls down shade).
+    // Called every time the tile becomes visible (user pulls down the shade).
     override fun onStartListening() {
         super.onStartListening()
         val prefs = Prefs(this)
@@ -80,53 +85,23 @@ class ClipboardTileService : TileService() {
             return
         }
 
-        // Clipboard must be read here on the main thread inside onClick().
-        // Android 10+ only grants clipboard access during user-initiated interactions.
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val item = clipboard.primaryClip?.getItemAt(0)
-
-        // Check if clipboard holds an image URI (e.g. Samsung screenshot).
-        val imageUri = item?.uri?.let { uri ->
-            try {
-                if (contentResolver.getType(uri)?.startsWith("image/") == true) uri else null
-            } catch (e: Exception) {
-                null
-            }
-        }
-        // Otherwise treat it as text.
-        val text = if (imageUri == null) item?.coerceToText(this)?.toString() else null
-
-        if (imageUri == null && text.isNullOrBlank()) {
-            setTile(Tile.STATE_ACTIVE, "Clipboard is empty")
-            return
+        // Hand off to the transparent activity, which can legally read the clipboard
+        // once it has focus, then sends it (with mDNS rediscovery on failure).
+        val intent = Intent(this, ClipSendActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION
         }
 
-        setTile(Tile.STATE_UNAVAILABLE, "Sending…")
-
-        scope.launch {
-            val (ok, result) = withContext(Dispatchers.IO) {
-                try {
-                    if (imageUri != null) {
-                        val mime = try {
-                            contentResolver.getType(imageUri) ?: "image/png"
-                        } catch (e: Exception) {
-                            "image/png"
-                        }
-                        val resp = Uploader.uploadFile(prefs, contentResolver, imageUri, mime)
-                        Pair(resp.isSuccessful, if (resp.isSuccessful) "✓ Image sent!" else "Error ${resp.code}")
-                    } else {
-                        val resp = Uploader.uploadText(prefs, text!!)
-                        Pair(resp.isSuccessful, if (resp.isSuccessful) "✓ Sent!" else "Error ${resp.code}")
-                    }
-                } catch (e: Exception) {
-                    Pair(false, "× ${e.message?.take(40)}")
-                }
-            }
-
-            setTile(
-                state    = if (ok) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE,
-                subtitle = result
+        // startActivityAndCollapse: launch the activity and close the shade. Its signature
+        // changed in Android 14 (API 34) from Intent to PendingIntent — support both.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val pending = PendingIntent.getActivity(
+                this, 0, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
+            startActivityAndCollapse(pending)
+        } else {
+            @Suppress("DEPRECATION")
+            startActivityAndCollapse(intent)
         }
     }
 

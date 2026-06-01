@@ -49,6 +49,7 @@ class SettingsActivity : AppCompatActivity() {
         val etToken = findViewById<TextInputEditText>(R.id.etToken)
         val btnSave      = findViewById<Button>(R.id.btnSave)
         val btnTest      = findViewById<Button>(R.id.btnTest)
+        val btnDiscover  = findViewById<Button>(R.id.btnDiscover)
         val btnClipboard = findViewById<Button>(R.id.btnClipboard)
 
         etIp.setText(prefs.ip)
@@ -90,6 +91,31 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
+        btnDiscover.setOnClickListener {
+            btnDiscover.isEnabled = false
+            btnDiscover.text = "Searching…"
+
+            // mDNS browse off the main thread; fills in the IP/port it finds.
+            lifecycleScope.launch {
+                val found = Discovery.findMac(this@SettingsActivity)
+                btnDiscover.isEnabled = true
+                btnDiscover.text = "Find Mac automatically"
+                if (found != null) {
+                    etIp.setText(found.ip)
+                    etPort.setText(found.port.toString())
+                    prefs.ip   = found.ip
+                    prefs.port = found.port
+                    Toast.makeText(this@SettingsActivity, "✓ Found Mac at ${found.ip}", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(
+                        this@SettingsActivity,
+                        "No Mac found. Make sure AndroidDrop is running on the Mac and both are on the same Wi-Fi.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+
         btnClipboard.setOnClickListener {
             if (!prefs.isConfigured) {
                 Toast.makeText(this, "Save the Mac IP first", Toast.LENGTH_SHORT).show()
@@ -118,12 +144,16 @@ class SettingsActivity : AppCompatActivity() {
                 val (ok, msg) = try {
                     if (imageUri != null) {
                         val mimeType = contentResolver.getType(imageUri) ?: "image/png"
-                        val resp = Uploader.uploadFile(prefs, contentResolver, imageUri, mimeType)
+                        val resp = Sender.send(this@SettingsActivity, prefs) {
+                            Uploader.uploadFile(prefs, contentResolver, imageUri, mimeType)
+                        }
                         Pair(resp.isSuccessful, if (resp.isSuccessful) "✓ Screenshot sent to Mac!" else "Error ${resp.code}")
                     } else {
                         val text = clip.coerceToText(this@SettingsActivity).toString()
                         if (text.isBlank()) return@launch
-                        val resp = Uploader.uploadText(prefs, text)
+                        val resp = Sender.send(this@SettingsActivity, prefs) {
+                            Uploader.uploadText(prefs, text)
+                        }
                         Pair(resp.isSuccessful, if (resp.isSuccessful) "✓ Clipboard sent to Mac!" else "Error ${resp.code}")
                     }
                 } catch (e: Exception) {

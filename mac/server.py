@@ -11,7 +11,6 @@ All write requests require the header:  x-token: <TOKEN from config.py>
 """
 
 import datetime
-import socket
 import subprocess
 from pathlib import Path
 
@@ -59,17 +58,8 @@ def _unique_path(directory: Path, filename: str) -> Path:
 
 
 def _local_ip() -> str:
-    """Best-effort: return this machine's LAN IP address."""
-    try:
-        # Connect to a public address without actually sending data,
-        # so the OS picks the right outgoing interface.
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
-    except Exception:
-        return "127.0.0.1"
-    finally:
-        s.close()
+    """This machine's LAN IP address (physical interface, not a VPN tunnel)."""
+    return config.local_ip()
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────

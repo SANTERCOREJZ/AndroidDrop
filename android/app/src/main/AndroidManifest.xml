@@ -59,13 +59,31 @@
             android:exported="false"
             android:theme="@style/Theme.AndroidDrop.Transparent"
             android:noHistory="true"
-            android:excludeFromRecents="true" />
+            android:excludeFromRecents="true"
+            android:taskAffinity="" />
 
         <!-- Foreground service: the persistent notification in the tray -->
         <service
             android:name=".DropService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!--
+            Quick Settings tile: the "AndroidDrop" button you can add to the
+            quick-settings panel (next to Wi-Fi/Bluetooth). Tap to send the clipboard.
+            BIND_QUICK_SETTINGS_TILE + the QS_TILE intent-filter are what register it
+            with the system so it shows up in the "edit tiles" tray.
+        -->
+        <service
+            android:name=".ClipboardTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
     </application>
 </manifest>

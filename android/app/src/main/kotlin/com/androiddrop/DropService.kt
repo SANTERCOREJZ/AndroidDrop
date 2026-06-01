@@ -79,9 +79,23 @@ class DropService : Service() {
                 val status = when {
                     !prefs.isConfigured -> "Open app to set Mac IP"
                     else -> {
-                        val ok = withContext(Dispatchers.IO) {
+                        var ok = withContext(Dispatchers.IO) {
                             try { Uploader.healthCheck(prefs).isSuccessful }
                             catch (e: Exception) { false }
+                        }
+                        // Self-heal: if the saved IP no longer answers, the Mac may have
+                        // a new address — rediscover it via mDNS and update the saved IP,
+                        // so sends keep working without the user touching anything.
+                        if (!ok) {
+                            val found = Discovery.findMac(this@DropService)
+                            if (found != null) {
+                                prefs.ip   = found.ip
+                                prefs.port = found.port
+                                ok = withContext(Dispatchers.IO) {
+                                    try { Uploader.healthCheck(prefs).isSuccessful }
+                                    catch (e: Exception) { false }
+                                }
+                            }
                         }
                         if (ok) "Mac connected" else "Mac unreachable"
                     }
@@ -99,7 +113,8 @@ class DropService : Service() {
         val sendPending = PendingIntent.getActivity(
             this, 0,
             Intent(this, ClipSendActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                // Own task + no animation so tapping the button doesn't visibly "open the app".
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
