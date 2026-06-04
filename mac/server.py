@@ -22,6 +22,7 @@ from fastapi import (
 
 import clipboard
 import config
+import tls
 
 app = FastAPI(title="AndroidDrop", version=config.VERSION)
 
@@ -77,6 +78,7 @@ def health():
         "version": config.VERSION,
         "ip": _local_ip(),
         "port": config.PORT,
+        "pin": f"sha256/{tls.spki_pin()}",
     }
 
 

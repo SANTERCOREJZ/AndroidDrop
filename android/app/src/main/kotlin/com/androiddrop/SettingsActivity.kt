@@ -51,6 +51,7 @@ class SettingsActivity : AppCompatActivity() {
         val btnTest      = findViewById<Button>(R.id.btnTest)
         val btnDiscover  = findViewById<Button>(R.id.btnDiscover)
         val btnClipboard = findViewById<Button>(R.id.btnClipboard)
+        val btnRepair    = findViewById<Button>(R.id.btnRepair)
 
         etIp.setText(prefs.ip)
         etPort.setText(prefs.port.toString())
@@ -114,6 +115,13 @@ class SettingsActivity : AppCompatActivity() {
                     ).show()
                 }
             }
+        }
+
+        btnRepair.setOnClickListener {
+            // Forget the pinned Mac key — the next connection will trust-on-first-use again.
+            // Use this only if you switched Macs or rebuilt the Mac app's certificate.
+            prefs.certPin = ""
+            Toast.makeText(this, "Pairing reset — will trust the next Mac you connect to.", Toast.LENGTH_LONG).show()
         }
 
         btnClipboard.setOnClickListener {

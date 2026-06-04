@@ -50,12 +50,19 @@ def start() -> None:
     if _zeroconf is not None:
         return  # already running
 
-    _zeroconf = Zeroconf()
-    _current_ip = config.local_ip()
-    _zeroconf.register_service(_make_info(_current_ip))
-    atexit.register(stop)
-
-    threading.Thread(target=_watch, daemon=True).start()
+    try:
+        _zeroconf = Zeroconf()
+        _current_ip = config.local_ip()
+        # allow_name_change keeps us from crashing if the name is already taken
+        # (e.g. a second instance) — zeroconf just appends a numeric suffix.
+        _zeroconf.register_service(_make_info(_current_ip), allow_name_change=True)
+        atexit.register(stop)
+        threading.Thread(target=_watch, daemon=True).start()
+    except Exception as e:
+        # Auto-discovery is a convenience, not core — never let it take down the app.
+        # The phone can still connect via a manually entered IP.
+        print(f"[discovery] mDNS advertise failed, continuing without it: {e}")
+        stop()
 
 
 def _watch() -> None:

@@ -30,6 +30,12 @@ class Prefs(context: Context) {
         get() = sp.getInt("last_inbox_seq", -1)
         set(v) { sp.edit().putInt("last_inbox_seq", v).apply() }
 
-    val baseUrl: String get() = "http://$ip:$port"
+    // Pinned TLS public-key of the Mac ("sha256/…"), learned on first connect.
+    // Empty = not paired yet (trust the next server we see). See [Net].
+    var certPin: String
+        get() = sp.getString("cert_pin", "") ?: ""
+        set(v) { sp.edit().putString("cert_pin", v).apply() }
+
+    val baseUrl: String get() = "https://$ip:$port"
     val isConfigured: Boolean get() = ip.isNotBlank()
 }

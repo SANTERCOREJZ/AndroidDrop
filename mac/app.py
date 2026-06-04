@@ -22,18 +22,22 @@ import uvicorn
 import config
 import discovery
 import server
+import tls
 from server import app as fastapi_app, _local_ip
 
 
 # ── Server thread ─────────────────────────────────────────────────────────────
 
 def _run_server() -> None:
-    """Run the FastAPI/uvicorn server. Called in a background thread."""
+    """Run the FastAPI/uvicorn server over HTTPS. Called in a background thread."""
+    cert_file, key_file = tls.ensure_cert()
     uv_config = uvicorn.Config(
         fastapi_app,
         host=config.HOST,
         port=config.PORT,
-        log_level="warning",  # quieter console output
+        log_level="warning",       # quieter console output
+        ssl_certfile=cert_file,    # self-signed → HTTPS + WSS
+        ssl_keyfile=key_file,
     )
     uvicorn.Server(uv_config).run()
 
@@ -57,7 +61,8 @@ class AndroidDropApp(rumps.App):
             None,  # separator
             self.send_item,
             None,
-            rumps.MenuItem(f"Listening on  {_local_ip()}:{config.PORT}"),  # informational, no callback
+            rumps.MenuItem(f"Listening on  https://{_local_ip()}:{config.PORT}"),  # informational
+            rumps.MenuItem("Show Security Code", callback=self.show_pin),
             None,
             rumps.MenuItem("Quit", callback=self.quit_app),
         ]
@@ -95,6 +100,18 @@ class AndroidDropApp(rumps.App):
         """Enable/disable pushing the Mac clipboard to Android."""
         sender.state = not sender.state
         server.set_watch_enabled(bool(sender.state))
+
+    def show_pin(self, _):
+        """Show the TLS public-key pin so you can verify the phone trusts THIS Mac."""
+        rumps.alert(
+            title="Security Code (TLS key pin)",
+            message=(
+                "Your phone trusts this Mac on first connect. If the Android app ever "
+                "shows a security warning, compare this code with the one on the phone:\n\n"
+                f"sha256/{tls.spki_pin()}"
+            ),
+            ok="Close",
+        )
 
     def quit_app(self, _):
         discovery.stop()

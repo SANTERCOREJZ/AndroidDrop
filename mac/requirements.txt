@@ -5,3 +5,7 @@ rumps>=0.4.0
 pyobjc-framework-Cocoa>=10.0
 zeroconf>=0.131
 websockets>=12.0
+cryptography>=42.0
+
+# Build-only: packaging the standalone AndroidDrop.app (see build_app.sh)
+py2app>=0.28

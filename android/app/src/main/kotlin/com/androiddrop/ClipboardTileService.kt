@@ -6,7 +6,6 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import kotlinx.coroutines.*
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
@@ -32,8 +31,9 @@ class ClipboardTileService : TileService() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    // Short-timeout client just for the health-check ping — we don't want to block the shade for 10s.
-    private val pingClient = OkHttpClient.Builder()
+    // Short-timeout client (derived from the TLS-pinned base) just for the health-check ping —
+    // we don't want to block the shade for 10s.
+    private val pingClient = Net.base().newBuilder()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(3, TimeUnit.SECONDS)
         .build()

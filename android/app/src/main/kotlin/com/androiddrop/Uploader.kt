@@ -5,7 +5,6 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
@@ -23,8 +22,9 @@ import java.util.concurrent.TimeUnit
  */
 object Uploader {
 
-    // One shared client — it manages a connection pool internally, so don't create one per request.
-    private val http = OkHttpClient.Builder()
+    // Derived from the shared TLS-pinned client (Net.base()), so all calls go over HTTPS
+    // with the Mac's pinned key. We only tweak timeouts here.
+    private val http = Net.base().newBuilder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)   // large files need more write time
         .readTimeout(30, TimeUnit.SECONDS)

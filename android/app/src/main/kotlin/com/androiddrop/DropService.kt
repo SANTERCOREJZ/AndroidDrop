@@ -12,7 +12,6 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -52,8 +51,8 @@ class DropService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var pingJob: Job? = null
 
-    // Long-lived client for the WebSocket: keep-alive pings, no read timeout.
-    private val wsClient = OkHttpClient.Builder()
+    // Long-lived WebSocket client, derived from the TLS-pinned base (so it's wss://).
+    private val wsClient = Net.base().newBuilder()
         .pingInterval(20, TimeUnit.SECONDS)
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -172,7 +171,10 @@ class DropService : Service() {
 
         val seq = ev.optInt("seq", -1)
         val prefs = Prefs(this)
-        if (seq in 0..prefs.lastInboxSeq) return  // already shown this clip
+        // Suppress only the EXACT same seq we last handled — that's the server replaying
+        // the current clip on WS reconnect. We can't use "<=" because the Mac's seq resets
+        // to 0 every time its app restarts, which would make us ignore all new clips.
+        if (seq >= 0 && seq == prefs.lastInboxSeq) return
         if (seq >= 0) prefs.lastInboxSeq = seq
 
         showIncoming(type, ev.optString("preview"))
