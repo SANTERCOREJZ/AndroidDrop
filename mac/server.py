@@ -12,6 +12,7 @@ All write requests require the header:  x-token: <TOKEN from config.py>
 
 import asyncio
 import datetime
+import mimetypes
 import subprocess
 from pathlib import Path
 
@@ -212,6 +213,9 @@ async def ws_endpoint(websocket: WebSocket):
         # If something's already on the clipboard, let the phone know right away.
         if _outbox.kind:
             await websocket.send_json(_outbox_event())
+        # Likewise, re-announce any pending outgoing file (phone dedups by seq).
+        if _filesend.name:
+            await websocket.send_json(_filesend_event())
         # We don't expect messages from the phone; this loop just keeps the socket
         # open and detects when it drops.
         while True:
@@ -251,8 +255,90 @@ def outbox_file(x_token: str = Header(...)):
     )
 
 
+# ── Mac → Android: outgoing arbitrary file (AirDrop-like) ────────────────────
+#
+# Separate from the clipboard outbox: dragging a file onto the menu bar icon stashes
+# it here and pushes a {"type": "file"} event over the WebSocket. The phone then pulls
+# /file/meta and /file/data and saves the file to its Downloads — no clipboard involved.
+# Keeping it separate means copying something on the Mac never clobbers a pending file,
+# and Android dedups it with its own sequence number.
+
+class _FileSend:
+    """Holds the most recent file the user dragged out to Android."""
+    def __init__(self):
+        self.seq = 0
+        self.name = None
+        self.mime = None
+        self.data = None        # raw file bytes
+        self.size = 0
+
+    def put(self, name, mime, data):
+        self.seq += 1
+        self.name, self.mime, self.data, self.size = name, mime, data, len(data)
+
+
+_filesend = _FileSend()
+
+# The asyncio loop uvicorn runs on; captured at startup so send_file() (called from the
+# AppKit/main thread on drop) can hand the broadcast back to the server's event loop.
+_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _filesend_event() -> dict:
+    """Compact JSON pushed over the WebSocket when a file is ready (no bytes here)."""
+    if _filesend.name:
+        return {
+            "type": "file", "seq": _filesend.seq,
+            "name": _filesend.name, "size": _filesend.size,
+        }
+    return {"type": "empty", "seq": _filesend.seq}
+
+
+def send_file(path) -> None:
+    """
+    Queue a file to send to connected phones and broadcast a WebSocket event.
+
+    Called from the AppKit main thread (drag & drop handler), so we bounce the async
+    broadcast onto the server's event loop with run_coroutine_threadsafe.
+    """
+    path = Path(path)
+    data = path.read_bytes()
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    _filesend.put(path.name, mime, data)
+
+    if _loop is not None:
+        asyncio.run_coroutine_threadsafe(_broadcast(_filesend_event()), _loop)
+
+
+@app.get("/file/meta")
+def file_meta(x_token: str = Header(...)):
+    """Phone pulls metadata for the pending outgoing file on tap."""
+    _require_token(x_token)
+    if _filesend.name:
+        return {
+            "type": "file", "seq": _filesend.seq,
+            "name": _filesend.name, "mime": _filesend.mime, "size": _filesend.size,
+        }
+    return {"type": "empty", "seq": _filesend.seq}
+
+
+@app.get("/file/data")
+def file_data(x_token: str = Header(...)):
+    """Raw bytes for the current outgoing file."""
+    _require_token(x_token)
+    if not _filesend.name or _filesend.data is None:
+        raise HTTPException(status_code=404, detail="no file to send")
+    return Response(
+        content=_filesend.data,
+        media_type=_filesend.mime or "application/octet-stream",
+        headers={"X-Filename": _filesend.name},
+    )
+
+
 @app.on_event("startup")
 async def _start_watcher():
+    global _loop
+    _loop = asyncio.get_running_loop()
     asyncio.create_task(_watch_pasteboard())
 
 

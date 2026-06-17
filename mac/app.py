@@ -15,12 +15,14 @@ daemon=True on the server thread means it dies automatically when the app quits.
 
 import subprocess
 import threading
+from pathlib import Path
 
 import rumps
 import uvicorn
 
 import config
 import discovery
+import dropzone
 import icons
 import server
 import settings
@@ -90,6 +92,33 @@ class AndroidDropApp(rumps.App):
         # Advertise ourselves via mDNS so Android can find us automatically,
         # even after the Mac's IP changes.
         discovery.start()
+
+        # Attach the drag-&-drop target onto the menu-bar icon. The status item only
+        # exists once rumps has started the run loop, so do it shortly after launch
+        # with a one-shot timer.
+        self._attach_timer = rumps.Timer(self._attach_dropzone, 0.5)
+        self._attach_timer.start()
+
+    # ── Drag & drop ───────────────────────────────────────────────────────────
+
+    def _attach_dropzone(self, timer):
+        """One-shot: lay the file drop target over the menu-bar icon, then stop."""
+        timer.stop()
+        try:
+            dropzone.attach(self._nsapp.nsstatusitem, self._on_file_dropped)
+        except Exception:
+            pass
+
+    def _on_file_dropped(self, paths):
+        """A file was dropped on the menu-bar icon — send the first one to the phone."""
+        if not paths:
+            return
+        path = paths[0]  # v1: one file at a time
+        try:
+            server.send_file(path)
+            server._notify(f"Sending {Path(path).name} to phone…")
+        except Exception as e:
+            server._notify(f"Could not send file: {e}")
 
     # ── Menu callbacks ────────────────────────────────────────────────────────
 

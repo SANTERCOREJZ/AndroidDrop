@@ -30,6 +30,12 @@ class Prefs(context: Context) {
         get() = sp.getInt("last_inbox_seq", -1)
         set(v) { sp.edit().putInt("last_inbox_seq", v).apply() }
 
+    // Same idea as lastInboxSeq, but for the separate "file send" channel (AirDrop-like
+    // arbitrary files from the Mac). Kept apart so a clipboard copy never hides a file.
+    var lastFileSeq: Int
+        get() = sp.getInt("last_file_seq", -1)
+        set(v) { sp.edit().putInt("last_file_seq", v).apply() }
+
     // Pinned TLS public-key of the Mac ("sha256/…"), learned on first connect.
     // Empty = not paired yet (trust the next server we see). See [Net].
     var certPin: String

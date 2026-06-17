@@ -112,6 +112,28 @@ object Uploader {
         ).execute()
     }
 
+    /** Mac → Android (AirDrop-like): pull metadata for the pending outgoing file. */
+    fun getFileMeta(prefs: Prefs): Response {
+        return http.newCall(
+            Request.Builder()
+                .url("${prefs.baseUrl}/file/meta")
+                .header("x-token", prefs.token)
+                .get()
+                .build()
+        ).execute()
+    }
+
+    /** Mac → Android (AirDrop-like): download the pending outgoing file's bytes. */
+    fun getFileData(prefs: Prefs): Response {
+        return http.newCall(
+            Request.Builder()
+                .url("${prefs.baseUrl}/file/data")
+                .header("x-token", prefs.token)
+                .get()
+                .build()
+        ).execute()
+    }
+
     /** Ping /health to verify the IP and token are correct before the first real send. */
     fun healthCheck(prefs: Prefs): Response {
         return http.newCall(

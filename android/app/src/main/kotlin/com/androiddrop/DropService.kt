@@ -5,10 +5,14 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.IBinder
+import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
@@ -40,8 +44,11 @@ class DropService : Service() {
         private const val CHANNEL_ID = "androiddrop_status"
         // _v2: bumped so the now-silent settings replace the old noisy channel on update.
         private const val INCOMING_CHANNEL_ID = "androiddrop_incoming_v2"
+        // Separate channel for received files (AirDrop-like), so they read as "downloads".
+        private const val FILE_CHANNEL_ID = "androiddrop_files"
         const val NOTIF_ID = 1
         private const val INCOMING_NOTIF_ID = 2
+        private const val FILE_NOTIF_ID = 3
         private const val WS_RETRY_MS = 4_000L
 
         fun start(context: Context) {
@@ -168,6 +175,11 @@ class DropService : Service() {
     private fun handleIncoming(text: String) {
         val ev = try { JSONObject(text) } catch (e: Exception) { return }
         val type = ev.optString("type")
+
+        if (type == "file") {
+            handleIncomingFile(ev)
+            return
+        }
         if (type != "text" && type != "image") return
 
         val seq = ev.optInt("seq", -1)
@@ -179,6 +191,95 @@ class DropService : Service() {
         if (seq >= 0) prefs.lastInboxSeq = seq
 
         showIncoming(type, ev.optString("preview"))
+    }
+
+    // ── Incoming arbitrary file (AirDrop-like) ──────────────────────────────────
+
+    private fun handleIncomingFile(ev: JSONObject) {
+        val seq = ev.optInt("seq", -1)
+        val prefs = Prefs(this)
+        // Dedup on its own channel (Mac's seq resets to 0 on app restart, so match exactly).
+        if (seq >= 0 && seq == prefs.lastFileSeq) return
+        if (seq >= 0) prefs.lastFileSeq = seq
+
+        val name = ev.optString("name").ifBlank { "file" }
+        // No clipboard/focus needed: writing to MediaStore works straight from the service.
+        scope.launch {
+            showFileNotif("Receiving file from Mac…", name, null, null)
+            val saved = withContext(Dispatchers.IO) {
+                try { downloadAndSave(prefs) } catch (e: Exception) { null }
+            }
+            if (saved != null) {
+                showFileNotif("Saved to Downloads", saved.name, saved.uri, saved.mime)
+            } else {
+                showFileNotif("Couldn't receive file from Mac", name, null, null)
+            }
+        }
+    }
+
+    private data class SavedFile(val name: String, val mime: String, val uri: Uri)
+
+    /** Blocking — call inside Dispatchers.IO. Pulls metadata + bytes and writes to Downloads. */
+    private fun downloadAndSave(prefs: Prefs): SavedFile? {
+        val metaResp = Uploader.getFileMeta(prefs)
+        if (!metaResp.isSuccessful) return null
+        val meta = JSONObject(metaResp.body?.string() ?: return null)
+        if (meta.optString("type") != "file") return null
+        val name = meta.optString("name").ifBlank { "file" }
+        val mime = meta.optString("mime").ifBlank { "application/octet-stream" }
+
+        val dataResp = Uploader.getFileData(prefs)
+        if (!dataResp.isSuccessful) return null
+        val bytes = dataResp.body?.bytes() ?: return null
+
+        val uri = saveToDownloads(bytes, name, mime) ?: return null
+        return SavedFile(name, mime, uri)
+    }
+
+    /** Save bytes into Download/AndroidDrop via MediaStore (Android 10+, no permissions). */
+    private fun saveToDownloads(bytes: ByteArray, name: String, mime: String): Uri? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null  // pre-10: scoped storage only
+        val resolver = contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, mime)
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AndroidDrop")
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+        return try {
+            resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return null
+            uri
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null)
+            null
+        }
+    }
+
+    private fun showFileNotif(title: String, name: String, uri: Uri?, mime: String?) {
+        val builder = NotificationCompat.Builder(this, FILE_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_logo)
+            .setContentTitle(title)
+            .setContentText(name)
+            .setSilent(true)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+
+        // When the file is saved, tapping the notification opens it.
+        if (uri != null) {
+            val view = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime ?: "*/*")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val pi = PendingIntent.getActivity(
+                this, 2, view,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.setContentIntent(pi)
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText("$name\n\nTap to open"))
+        }
+
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(FILE_NOTIF_ID, builder.build())
     }
 
     private fun showIncoming(type: String, preview: String) {
@@ -255,6 +356,15 @@ class DropService : Service() {
         nm.createNotificationChannel(
             NotificationChannel(INCOMING_CHANNEL_ID, "Clipboard from Mac", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "Silent alerts when the Mac copies something"
+                enableVibration(false)
+                setSound(null, null)
+            }
+        )
+
+        // Silent channel for files received from the Mac (AirDrop-like).
+        nm.createNotificationChannel(
+            NotificationChannel(FILE_CHANNEL_ID, "Files from Mac", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Files sent from the Mac, saved to Downloads"
                 enableVibration(false)
                 setSound(null, null)
             }
